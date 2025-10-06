@@ -42,7 +42,7 @@ fi
 
 # Starship prompt (if installed)
 export PATH=$PATH:/home/cipher/.local/bin
-eval "$(oh-my-posh init bash --config 'https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/refs/heads/main/themes/clean-detailed.omp.json')"
+eval "$(oh-my-posh init bash --config 'https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/refs/heads/main/themes/kali.omp.json')"
 #eval "$(starship init bash)"
 
 # Bash completion for Git
@@ -66,3 +66,30 @@ case $- in
 	*i*) ;;
 	*) return ;;
 esac
+
+work() {
+  set +e
+
+  local proj="/home/blakeridgway/Drives/500GB/PycharmProjects/time_logix"
+  cd "$proj" || { echo "No such dir: $proj" >&2; return 1; }
+
+  # Ensure venv exists
+  [ -d venv ] || python3 -m venv venv || { echo "venv create failed" >&2; return 1; }
+
+  # Activate venv
+  . venv/bin/activate
+
+  # Always deactivate when function returns
+  trap 'deactivate 2>/dev/null || true' RETURN
+
+  # Run the app
+  python main.py
+  local code=$?
+
+  # Move back to home regardless of success/failure
+  cd ~ || true
+
+  if [ $code -ne 0 ]; then
+    echo "main.py exited with code $code"
+  fi
+}
