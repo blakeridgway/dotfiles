@@ -19,6 +19,7 @@ BASE_PACKAGE_LIST=(
     gh
     fd-find
     flatpak
+    jq
     python3
     python3-pip
     ripgrep
@@ -102,8 +103,8 @@ done
 if [ "$PACKAGE_MANAGER" == "apt" ] && command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
     if dpkg-query -W -f='${Status}' "fd-find" 2>/dev/null | grep -q "ok installed"; then
         echo "Creating symlink for fd from fdfind..."
-        sudo ln -sf /usr/bin/fdfind /usr/local/bin/fd # or ~/.local/bin/fd if preferred
-    fi # Ensure this line is just 'fi' (and optional comment)
+        sudo ln -sf /usr/bin/fdfind /usr/local/bin/fd 
+    fi
 fi
 
 
