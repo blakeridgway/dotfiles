@@ -1,127 +1,74 @@
 #!/bin/bash
 
-# 01-package-install.sh
-# Installs system packages and Flatpak applications.
-# Relies on DISTRO and PACKAGE_MANAGER being set by the caller.
+# Package Installation Script
 
-echo "--- Starting Package Installation ---"
+set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../lib/helpers.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../setup.conf"
+
+setup_error_trapping
+init_logging
+
+print_msg INFO "=== Package Installation ==="
+
+# Validate environment
 if [ -z "$DISTRO" ] || [ -z "$PACKAGE_MANAGER" ]; then
-    echo "ERROR: DISTRO and PACKAGE_MANAGER must be set in the environment."
-    exit 1
-fi
-
-# Define base package list
-BASE_PACKAGE_LIST=(
-    btop
-    curl
-    git
-    gh
-    fd-find
-    flatpak
-    jq
-    python3
-    python3-pip
-    ripgrep
-    virt-manager
-    zsh
-    wget
-    unzip
-)
-
-# Distro-specific packages to add to the main list
-DISTRO_SPECIFIC_PACKAGES=()
-if [ "$PACKAGE_MANAGER" == "dnf" ]; then
-    DISTRO_SPECIFIC_PACKAGES+=(
-        "fontconfig-devel"  # for fc-cache
-        "openssl-devel"     # for various compilations
-        "util-linux-user"   # for chsh, if needed by OhMyZsh script
-    )
-elif [ "$PACKAGE_MANAGER" == "apt" ]; then
-    DISTRO_SPECIFIC_PACKAGES+=(
-        "libfontconfig-dev"
-        "libssl-dev"
-        "fd-find" # On Debian/Ubuntu, binary is fdfind, symlink to fd often needed
-                  # Or user might prefer 'fd' package if available from other sources
-    )
+    error_exit "DISTRO and PACKAGE_MANAGER must be set" "$LINENO"
 fi
 
 # Combine package lists
-PACKAGE_LIST=("${BASE_PACKAGE_LIST[@]}" "${DISTRO_SPECIFIC_PACKAGES[@]}")
-PACKAGE_LIST=($(printf "%s\n" "${PACKAGE_LIST[@]}" | LC_ALL=C sort -u))
+declare -a PACKAGES_TO_INSTALL=()
+PACKAGES_TO_INSTALL+=("${COMMON_PACKAGES[@]}")
 
+if [ "$PACKAGE_MANAGER" = "dnf" ]; then
+    PACKAGES_TO_INSTALL+=("${DNF_PACKAGES[@]}")
+elif [ "$PACKAGE_MANAGER" = "apt" ]; then
+    PACKAGES_TO_INSTALL+=("${APT_PACKAGES[@]}")
+fi
 
-FLATPAK_LIST=(
-    com.bitwarden.desktop
-    com.discordapp.Discord
-    com.github.tchx84.Flatseal
-    com.jetbrains.Rider
-    com.valvesoftware.Steam
-    com.visualstudio.code
-    net.davidotek.pupgui2
-    net.veloren.airshipper
-    org.signal.Signal
-    org.videolan.VLC
-)
+# Remove duplicates and sort
+PACKAGES_TO_INSTALL=($(printf "%s\n" "${PACKAGES_TO_INSTALL[@]}" | LC_ALL=C sort -u))
 
-echo "Installing System Packages..."
-for package_name in "${PACKAGE_LIST[@]}"; do
-    if [ "$PACKAGE_MANAGER" == "dnf" ]; then
-        if ! rpm -q "$package_name" &>/dev/null; then
-            echo "Installing $package_name (dnf)..."
-            if sudo dnf install "$package_name" -y; then
-                echo "$package_name has been installed."
-            else
-                echo "WARNING: Failed to install $package_name. It may not be available in the repositories."
-            fi
-        else
-            echo "$package_name already installed."
-        fi
-
-    elif [ "$PACKAGE_MANAGER" == "apt" ]; then
-        # For apt, check if package provides the command or is installed
-        # dpkg-query is generally more reliable for checking installed status
-        actual_package_name=$package_name
-        if [ "$package_name" == "fd-find" ] && ! dpkg -s fd-find &>/dev/null ; then
-            # On some newer Ubuntu/Debian, 'fd-find' might be the package,
-            # but user might want 'fd' if it's a different source or a metapackage.
-            # For now, we stick to fd-find.
-            : # Keep actual_package_name as fd-find
-        fi
-
-        if ! dpkg-query -W -f='${Status}' "$actual_package_name" 2>/dev/null | grep -q "ok installed"; then
-            echo "Installing $actual_package_name (apt)..."
-            sudo apt install "$actual_package_name" -y
-            echo "$actual_package_name has been installed."
-        else
-            echo "$actual_package_name already installed."
-        fi
+# Install system packages
+print_msg INFO "Installing ${#PACKAGES_TO_INSTALL[@]} system packages..."
+local count=1
+for package in "${PACKAGES_TO_INSTALL[@]}"; do
+    show_progress "$count" "${#PACKAGES_TO_INSTALL[@]}" "Installing $package"
+    if ! install_package "$package" "$PACKAGE_MANAGER"; then
+        print_msg WARN "Failed to install $package"
     fi
+    count=$((count + 1))
 done
 
-# Post-install for fd-find on Debian/Ubuntu (create symlink)
-if [ "$PACKAGE_MANAGER" == "apt" ] && command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
-    if dpkg-query -W -f='${Status}' "fd-find" 2>/dev/null | grep -q "ok installed"; then
-        echo "Creating symlink for fd from fdfind..."
-        sudo ln -sf /usr/bin/fdfind /usr/local/bin/fd 
+# Handle fd-find symlink for Debian/Ubuntu
+if [ "$PACKAGE_MANAGER" = "apt" ]; then
+    if command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
+        print_msg INFO "Creating fd symlink from fdfind..."
+        execute "Creating fd symlink" "sudo ln -sf /usr/bin/fdfind /usr/local/bin/fd"
     fi
 fi
 
-
-echo "Installing Flatpak Applications..."
-if command -v flatpak &> /dev/null; then
-    for flatpak_name in "${FLATPAK_LIST[@]}"; do
-        if ! flatpak list --app | grep -q "$flatpak_name"; then
-            echo "Installing Flatpak $flatpak_name..."
-            flatpak install flathub "$flatpak_name" -y
-            echo "$flatpak_name has been installed."
-        else
-            echo "Flatpak $flatpak_name already installed."
-        fi
-    done
+# Install Flatpak applications
+if [ "$INSTALL_FLATPAK_APPS" = true ]; then
+    print_msg INFO "Installing Flatpak applications..."
+    if ! command -v flatpak &>/dev/null; then
+        print_msg WARN "Flatpak not installed, skipping Flatpak apps"
+    else
+        local flatpak_count=1
+        for app in "${FLATPAK_APPS[@]}"; do
+            show_progress "$flatpak_count" "${#FLATPAK_APPS[@]}" "Installing Flatpak: $app"
+            if ! install_flatpak_app "$app"; then
+                print_msg WARN "Failed to install Flatpak app: $app"
+            fi
+            flatpak_count=$((flatpak_count + 1))
+        done
+    fi
 else
-    echo "WARNING: flatpak command not found. Skipping Flatpak app installation."
+    print_msg INFO "Skipping Flatpak app installation (disabled)"
 fi
 
-echo "--- Package Installation Finished ---"
-
+print_msg SUCCESS "Package installation completed"

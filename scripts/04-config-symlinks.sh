@@ -1,82 +1,86 @@
 #!/bin/bash
 
-# 04-config-symlinks.sh
-# Copies Starship config, configures Teams for Linux, and symlinks dotfiles.
-# Relies on SCRIPT_ROOT_DIR being set by the caller.
+# Configuration and Symlinks Setup
 
-echo "--- Starting Configuration and Symlinking ---"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../lib/helpers.sh"
+
+setup_error_trapping
+init_logging
 
 if [ -z "$SCRIPT_ROOT_DIR" ]; then
-    echo "ERROR: SCRIPT_ROOT_DIR must be set in the environment."
-    exit 1
+    error_exit "SCRIPT_ROOT_DIR must be set" "$LINENO"
 fi
 
-# Starship Config File
+print_msg INFO "=== Configuration and Symlinks Setup ==="
+
+BACKUP_DIR="${SCRIPT_ROOT_DIR}/.backups"
+mkdir -p "$BACKUP_DIR"
+
+# Starship Configuration
+print_msg INFO "Setting up Starship configuration..."
 STARSHIP_CONFIG_SOURCE="${SCRIPT_ROOT_DIR}/terminal/starship.toml"
-STARSHIP_CONFIG_DEST_DIR="$HOME/.config"
-STARSHIP_CONFIG_DEST_FILE="${STARSHIP_CONFIG_DEST_DIR}/starship.toml"
+STARSHIP_CONFIG_DEST="$HOME/.config/starship.toml"
 
-echo ""
-echo "Setting up Starship configuration..."
 if [ -f "$STARSHIP_CONFIG_SOURCE" ]; then
-    mkdir -p "$STARSHIP_CONFIG_DEST_DIR"
-    cp "$STARSHIP_CONFIG_SOURCE" "$STARSHIP_CONFIG_DEST_FILE"
-    echo "Copied starship.toml to $STARSHIP_CONFIG_DEST_FILE"
+    mkdir -p "$HOME/.config"
+    backup_file "$STARSHIP_CONFIG_DEST" "$BACKUP_DIR" || true
+    execute "Copying Starship config" "cp $STARSHIP_CONFIG_SOURCE $STARSHIP_CONFIG_DEST"
 else
-    echo "WARNING: Starship config source not found: $STARSHIP_CONFIG_SOURCE. Skipping copy."
+    print_msg WARN "Starship config not found: $STARSHIP_CONFIG_SOURCE"
 fi
 
-#  Teams for Linux Configuration 
-echo ""
-echo "Setting up Teams for Linux (Community/Flatpak) configuration..."
+# Teams for Linux Configuration
+print_msg INFO "Setting up Teams for Linux configuration..."
 TEAMS_FLATPAK_DIR="$HOME/.var/app/com.github.IsmaelMartinez.teams_for_linux"
 
-# Only proceed if the application data directory exists
 if [ -d "$TEAMS_FLATPAK_DIR" ]; then
-    # Check for jq dependency
-    if ! command -v jq &> /dev/null; then
-        echo "WARNING: 'jq' is not installed. Skipping Teams for Linux config."
+    if ! command -v jq &>/dev/null; then
+        print_msg WARN "jq not installed, skipping Teams config"
     else
         CONFIG_DIR="${TEAMS_FLATPAK_DIR}/config/teams-for-linux"
         CONFIG_FILE="${CONFIG_DIR}/config.json"
-
-        # Ensure the target directory exists
+        
         mkdir -p "$CONFIG_DIR"
-
-        # Safely add/update the disableAutogain setting using jq
-        # This handles a non-existent file gracefully by creating an empty JSON object
-        cat "$CONFIG_FILE" 2>/dev/null || echo "{}" | jq '.disableAutogain = true' > "${CONFIG_FILE}.tmp"
+        
+        print_msg INFO "Configuring Teams auto-gain setting..."
+        # Safely update JSON with jq
+        if [ -f "$CONFIG_FILE" ]; then
+            backup_file "$CONFIG_FILE" "$BACKUP_DIR"
+        fi
+        
+        jq '.disableAutogain = true' "${CONFIG_FILE:--}" > "${CONFIG_FILE}.tmp" 2>/dev/null || echo '{"disableAutogain": true}' > "${CONFIG_FILE}.tmp"
         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-
-        echo "Successfully configured 'disableAutogain: true' in $CONFIG_FILE"
+        
+        print_msg SUCCESS "Teams configuration updated"
     fi
 else
-    echo "Teams for Linux Flatpak directory not found. Skipping configuration."
+    print_msg DEBUG "Teams for Linux not found (expected if not installed)"
 fi
 
-# Symlink files (keeping the original simple approach)
+# Dotfiles Symlinking
+print_msg INFO "Symlinking dotfiles..."
 
-echo ""
-echo "Symlinking dotfiles..."
-FILES=('vimrc' 'vim' 'bashrc' 'zsh' 'agignore' 'gitconfig' 'gitignore' 'commit-conventions.txt' 'aliases.zsh')
+declare -a DOTFILES=('vimrc' 'vim' 'bashrc' 'zsh' 'agignore' 'gitconfig' 'gitignore' 'commit-conventions.txt' 'aliases.zsh' 'aliases.bash')
 
-for file in "${FILES[@]}"; do
-    echo ""
-    echo "Symlinking $file to $HOME"
+for dotfile in "${DOTFILES[@]}"; do
+    SOURCE="${SCRIPT_ROOT_DIR}/${dotfile}"
+    TARGET="$HOME/.$dotfile"
     
-    # Check if source file exists first
-    if [ -e "${SCRIPT_ROOT_DIR}/${file}" ]; then
-        ln -sf "${SCRIPT_ROOT_DIR}/${file}" "$HOME/.$file"
-        if [ $? -eq 0 ]; then
-            echo "${SCRIPT_ROOT_DIR}/${file} ~> $HOME/.$file"
-        else
-            echo "Install failed to symlink $file."
-            exit 1
-        fi
+    if [ -e "$SOURCE" ]; then
+        safe_symlink "$SOURCE" "$TARGET" "$BACKUP_DIR"
     else
-        echo "WARNING: Source file not found: ${SCRIPT_ROOT_DIR}/${file}. Skipping."
+        print_msg DEBUG "Source not found: $SOURCE (skipping)"
     fi
 done
 
-echo ""
-echo "--- Configuration and Symlinking Finished ---"
+# Add additional config symlinks if they exist
+if [ -f "${SCRIPT_ROOT_DIR}/terminal/starship.toml" ]; then
+    safe_symlink "${SCRIPT_ROOT_DIR}/terminal/starship.toml" "$HOME/.config/starship.toml" "$BACKUP_DIR"
+fi
+
+print_msg SUCCESS "Configuration and symlinks setup completed"
+print_msg INFO "Backups saved to: $BACKUP_DIR"
