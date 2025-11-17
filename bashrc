@@ -70,7 +70,7 @@ esac
 work() {
   set +e
 
-  local proj="/home/blakeridgway/Drives/500GB/PycharmProjects/time_logix"
+  local proj="$HOME/Drives/500GB/PycharmProjects/time_logix"
   cd "$proj" || { echo "No such dir: $proj" >&2; return 1; }
 
   # Ensure venv exists
@@ -93,3 +93,5 @@ work() {
     echo "main.py exited with code $code"
   fi
 }
+# added by 02-dev-tools-setup.sh
+export PATH=$PATH:/usr/local/go/bin
