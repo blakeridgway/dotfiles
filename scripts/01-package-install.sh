@@ -52,14 +52,16 @@ PACKAGE_LIST=($(printf "%s\n" "${PACKAGE_LIST[@]}" | LC_ALL=C sort -u))
 
 
 FLATPAK_LIST=(
+    com.adamcake.Bolt
     com.bitwarden.desktop
     com.discordapp.Discord
+    com.github.IsmaelMartinez.teams_for_linux
     com.github.tchx84.Flatseal
-    com.jetbrains.Rider
     com.valvesoftware.Steam
     com.visualstudio.code
+    io.podman_desktop.PodmanDesktop
     net.davidotek.pupgui2
-    net.veloren.airshipper
+    org.mozilla.Thunderbird
     org.signal.Signal
     org.videolan.VLC
 )
